@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# WalkingPad widget installer: sets up the collector backend (Python venv +
-# systemd user service) for the Omarchy shell plugin. Safe to re-run.
+# BA04 threadmill widget installer: sets up the collector backend (Python venv
+# + systemd user service) for the Omarchy shell plugin. Safe to re-run.
 set -euo pipefail
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_DIR="$HOME/.local/share/walkingpad"
+DATA_DIR="$HOME/.local/share/walkingpad-ba04"
 UNIT_DIR="$HOME/.config/systemd/user"
-UNIT="$UNIT_DIR/walkingpad.service"
+UNIT="$UNIT_DIR/walkingpad-ba04.service"
 
 command -v python3 >/dev/null 2>&1 || {
   echo "error: python3 is required (on Omarchy/Arch: sudo pacman -S python)" >&2
@@ -22,7 +22,7 @@ python3 -m venv "$DATA_DIR/venv"
 echo "Installing systemd user service ..."
 cat > "$UNIT" <<EOF
 [Unit]
-Description=WalkingPad step collector
+Description=BA04 threadmill calorie collector
 StartLimitIntervalSec=0
 
 [Service]
@@ -35,16 +35,16 @@ WantedBy=default.target
 EOF
 
 systemctl --user daemon-reload
-systemctl --user enable --now walkingpad.service
+systemctl --user enable --now walkingpad-ba04.service
 
 echo
-echo "Done. The collector is running and will connect to your pad automatically"
-echo "the next time it powers on."
+echo "Done. The collector is running and will connect to your threadmill"
+echo "automatically the next time it powers on."
 echo
-echo "Logs:    journalctl --user -u walkingpad -f"
-echo "Toggle:  systemctl --user stop walkingpad   (or right-click the bar widget)"
+echo "Logs:    journalctl --user -u walkingpad-ba04 -f"
+echo "Toggle:  systemctl --user stop walkingpad-ba04   (or right-click the widget)"
 echo
 echo "Uninstall:"
-echo "  systemctl --user disable --now walkingpad"
+echo "  systemctl --user disable --now walkingpad-ba04"
 echo "  rm $UNIT && systemctl --user daemon-reload"
-echo "  rm -rf $DATA_DIR   # deletes your step history"
+echo "  rm -rf $DATA_DIR   # deletes your calorie history"

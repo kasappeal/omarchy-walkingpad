@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Select which walking pad the collector connects to.
+"""Select which BA04 threadmill the collector connects to.
 
 Usage: select-pad.py <AA:BB:CC:DD:EE:FF | auto>
 
-Writes ~/.config/walkingpad/config.json (preserving other keys). The running
-collector watches the file and applies the change within seconds; passing
-"auto" clears the pin and returns to strongest-signal auto-connect.
+Writes ~/.config/walkingpad-ba04/config.json (preserving other keys). The
+running collector watches the file and applies the change within seconds;
+passing "auto" clears the pin and returns to strongest-signal auto-connect.
 """
 
 import json
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import safeio
 
-CONFIG_FILE = Path.home() / ".config" / "walkingpad" / "config.json"
+CONFIG_FILE = Path.home() / ".config" / "walkingpad-ba04" / "config.json"
 MAX_CONFIG_BYTES = 64 * 1024
 
 

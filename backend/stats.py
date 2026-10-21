@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-"""WalkingPad stats helper for the Omarchy bar widget.
+"""BA04 threadmill stats helper for the Omarchy bar widget.
 
 Reads the per-day rollup plus today's raw history tail (see rollup.py) and
 the collector's live status, and prints one JSON blob:
   {
     "enabled":   bool,                       # systemd service state
     "connected": bool, "walking": bool,      # live pad state (fresh only)
-    "live":      {"steps", "dist_m", "time_s", "speed", "session_start"},
-    "today":     {"steps", "dist_m", "time_s", "sessions", ...},
+    "live":      {"calories", "dist_m", "time_s", "speed", "target_speed",
+                  "state", "max_speed", "firmware", "session_start",
+                  "device_name", "address"},
+    "today":     {"calories", "dist_m", "time_s", "sessions", ...},
     "start":     "YYYY-MM-DD",               # Monday of the first grid week
-    "days":      {"YYYY-MM-DD": {"steps", "dist_m", "time_s", "sessions",
+    "days":      {"YYYY-MM-DD": {"calories", "dist_m", "time_s", "sessions",
                    "avg_speed", "median_speed", "max_speed",
                    "active_s", "longest_session_s"}, ...},
     "streak":    int,                        # consecutive goal days (or active
                                              # days when no goal is set)
-    "totals":    {"steps", "dist_m", "time_s", "sessions", "avg_speed",
+    "totals":    {"calories", "dist_m", "time_s", "sessions", "avg_speed",
                   "longest_session_s"},
     "devices":   [{"name", "address", "rssi", "protocol", "last_seen"}...],
     "selected_address": "AA:BB:.." | ""      # "" = auto (strongest signal)
   }
 
-Speed fields are null for days recovered only from pad "final" summaries
-(no per-second samples exist for those).
+"calories" is the pad's own whole-kcal session counter, which is what replaced
+the step count KingSmith pads reported; this device never reports steps.
+`median_speed`/`max_speed` are null for a day with no speed samples.
 """
 
 import argparse
@@ -32,13 +35,14 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+import ba04
 import safeio
 from rollup import aggregate_days, load_records, load_rollup
 
-DATA_DIR = Path.home() / ".local" / "share" / "walkingpad"
+DATA_DIR = Path.home() / ".local" / "share" / "walkingpad-ba04"
 STATUS_FILE = DATA_DIR / "status.json"
 DEVICES_FILE = DATA_DIR / "devices.json"
-CONFIG_FILE = Path.home() / ".config" / "walkingpad" / "config.json"
+CONFIG_FILE = Path.home() / ".config" / "walkingpad-ba04" / "config.json"
 
 GRID_WEEKS = 15
 LIVE_MAX_AGE = 10.0  # seconds before status.json counts as stale
@@ -46,8 +50,8 @@ MAX_STATE_BYTES = 64 * 1024  # status, devices, config are all tiny by design
 MAX_OUTPUT_BYTES = 256 * 1024  # the shell buffers our whole stdout; backstop
 
 EMPTY_DAY = {
-    "steps": 0,
-    "dist_m": 0,
+    "calories": 0,
+    "dist_m": 0.0,
     "time_s": 0,
     "sessions": 0,
     "avg_speed": None,
@@ -78,20 +82,14 @@ def all_days() -> dict:
     tail = load_records(since=through + timedelta(days=1))
     # Rollup and tail days are disjoint by construction (through < today),
     # so a plain update is a merge, not an overwrite.
-    days.update(
-        aggregate_days(
-            tail,
-            seed_live_ts=[float(rollup.get("last_live_ts", 0))],
-            seed_prev=rollup.get("carry", {}),
-        )
-    )
+    days.update(aggregate_days(tail, seed_prev=rollup.get("carry", {})))
     return days
 
 
 def compute_streak(days, goal: int) -> int:
     def hit(day: date) -> bool:
-        steps = days.get(day, {}).get("steps", 0)
-        return steps >= goal if goal > 0 else steps > 0
+        calories = days.get(day, {}).get("calories", 0)
+        return calories >= goal if goal > 0 else calories > 0
 
     cursor = date.today()
     if not hit(cursor):
@@ -106,7 +104,7 @@ def compute_streak(days, goal: int) -> int:
 def service_enabled() -> bool:
     try:
         out = subprocess.run(
-            ["systemctl", "--user", "is-active", "walkingpad.service"],
+            ["systemctl", "--user", "is-active", "walkingpad-ba04.service"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -144,7 +142,7 @@ def selected_address() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--goal", type=int, default=0, help="daily step goal")
+    parser.add_argument("--goal", type=int, default=0, help="daily calorie goal")
     args = parser.parse_args()
 
     days = all_days()
@@ -158,7 +156,7 @@ def main() -> None:
 
     totals = dict(EMPTY_DAY)
     for day_stats in days.values():
-        totals["steps"] += day_stats["steps"]
+        totals["calories"] += day_stats["calories"]
         totals["dist_m"] += day_stats["dist_m"]
         totals["time_s"] += day_stats["time_s"]
         # Sessions spanning midnight count once per day they touched.
@@ -176,10 +174,14 @@ def main() -> None:
             "connected": bool(live),
             "walking": bool(live and live.get("walking")),
             "live": {
-                "steps": live.get("steps", 0),
-                "dist_m": live.get("dist_m", 0),
+                "calories": live.get("calories", 0),
+                "dist_m": live.get("dist_m", 0.0),
                 "time_s": live.get("time_s", 0),
                 "speed": live.get("speed", 0.0),
+                "target_speed": live.get("target_speed", 0.0),
+                "state": live.get("state", ba04.STATE_STOPPED),
+                "max_speed": live.get("max_speed", 0.0),
+                "firmware": live.get("firmware", 0),
                 "session_start": live.get("session_start"),
                 "device_name": live.get("device_name", ""),
                 "address": live.get("address", ""),
@@ -191,7 +193,7 @@ def main() -> None:
             "days": {
                 day.isoformat(): stats
                 for day, stats in days.items()
-                if day >= grid_start and stats["steps"] > 0
+                if day >= grid_start and stats["calories"] > 0
             },
             "streak": compute_streak(days, args.goal),
             "totals": totals,

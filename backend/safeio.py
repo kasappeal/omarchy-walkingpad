@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Shared safe file IO for the WalkingPad backend.
+"""Shared safe file IO for the BA04 threadmill backend.
 
-All state lives under ~/.local/share/walkingpad and ~/.config/walkingpad,
-both writable by any process running as the user. Readers therefore treat
+All state lives under ~/.local/share/walkingpad-ba04 and
+~/.config/walkingpad-ba04, both writable by any process running as the user. Readers therefore treat
 paths as hostile: refuse symlinks and non-regular files, and cap bytes and
 lines so a planted FIFO or giant file can neither block nor exhaust the
 shell process polling stats.py. Writers use unpredictable temp names
