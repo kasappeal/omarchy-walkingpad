@@ -48,6 +48,7 @@ import ba04
 import rollup
 import safeio
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 DATA_DIR = Path.home() / ".local" / "share" / "walkingpad-ba04"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
@@ -58,6 +59,8 @@ CONFIG_FILE = Path.home() / ".config" / "walkingpad-ba04" / "config.json"
 SCAN_TIMEOUT = 10.0
 RETRY_DELAY = 3.0
 RECORD_MIN_INTERVAL = 5.0  # seconds between history rows for one session
+CONNECT_ATTEMPTS = 3  # connect attempts per scan hit before rescanning
+CONNECT_RETRY_DELAY = 2.0
 STATUS_MIN_INTERVAL = 1.0  # throttle status.json writes
 LINK_LOST_AFTER = 20.0  # no notification for this long -> treat as disconnected
 DEVICE_FORGET_AFTER = 24 * 3600  # drop pads not seen for a day
@@ -354,6 +357,35 @@ class Collector:
         log.info("Found pad: %s (%s, %s dBm)", device.name, device.address, adv.rssi)
         return device.address, device.name or device.address
 
+    async def connect_with_retry(self, address: str):
+        """Open a client, retrying the connect a few times.
+
+        The scan just proved the pad exists; what is flaky is the advertising
+        window, which the idle pad opens only every few seconds. Retrying the
+        connect is much quicker than falling back to a full scan per attempt.
+        """
+        last_error = None
+        for attempt in range(1, CONNECT_ATTEMPTS + 1):
+            client = BleakClient(address, timeout=CONNECT_TIMEOUT)
+            try:
+                await client.connect()
+                return client
+            except (OSError, ValueError, asyncio.TimeoutError, BleakError) as error:
+                last_error = error
+                log.info(
+                    "Connect attempt %d/%d to %s failed: %s",
+                    attempt,
+                    CONNECT_ATTEMPTS,
+                    address,
+                    type(error).__name__,
+                )
+                try:
+                    await client.disconnect()
+                except Exception:  # noqa: BLE001
+                    pass
+                await asyncio.sleep(CONNECT_RETRY_DELAY)
+        raise last_error
+
     async def run_connected(self, address: str, name: str) -> None:
         """Hold one connection, answering every notification with a poll.
 
@@ -382,7 +414,8 @@ class Collector:
                 self.on_reading(reading)
             notify_event.set()
 
-        async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+        client = await self.connect_with_retry(address)
+        try:
             self.device_name = name
             log.info("Connected to %s (%s)", self.device_name, address)
             await client.start_notify(ba04.CHARACTERISTIC_NOTIFY_BA04_UUID, on_notify)
@@ -411,13 +444,25 @@ class Collector:
                         response=True,
                     )
                     counter["n"] = (counter["n"] + 1) & 0xFF
-                except Exception:
-                    log.warning("Heartbeat write failed", exc_info=True)
+                except (OSError, ValueError, asyncio.TimeoutError, BleakError) as error:
+                    # Expected: this is how the pad ends a session.
+                    log.info("Heartbeat write failed (%s)", type(error).__name__)
                     return
                 try:
                     await asyncio.wait_for(notify_event.wait(), timeout=HEARTBEAT_WAIT)
                 except asyncio.TimeoutError:
                     pass  # no reply within the window; poll again regardless
+        finally:
+            # The pad drops us routinely; a clean teardown keeps BlueZ from
+            # holding a stale object that would slow the next connect.
+            try:
+                await client.stop_notify(ba04.CHARACTERISTIC_NOTIFY_BA04_UUID)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                await client.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
 
     def link_is_live(self) -> bool:
         return time.time() - self.last_packet < LINK_LOST_AFTER
