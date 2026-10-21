@@ -323,7 +323,12 @@ class Collector:
 
     # --- connection lifecycle ---
 
-    async def scan_for_pad(self):
+    async def scan_for_pad(self) -> tuple[str, str] | None:
+        """Return (address, name) for the pad to connect to, or None.
+
+        The name is only remembered for display: bleak needs the address, and
+        a stale BLEDevice object makes connects time out on this pad.
+        """
         log.info("Scanning for BA04 threadmill...")
         needle = str(self.config.get("device_name_contains", "pitpat")).lower()
         devices = await BleakScanner.discover(timeout=SCAN_TIMEOUT, return_adv=True)
@@ -339,7 +344,7 @@ class Collector:
             for device, _adv in candidates:
                 if device.address.lower() == pinned:
                     log.info("Found pinned pad: %s (%s)", device.name, device.address)
-                    return device
+                    return device.address, device.name or device.address
             return None
         if not candidates:
             return None
@@ -347,14 +352,21 @@ class Collector:
             candidates, key=lambda pair: candidate_rank(pair[0], pair[1], needle)
         )
         log.info("Found pad: %s (%s, %s dBm)", device.name, device.address, adv.rssi)
-        return device
+        return device.address, device.name or device.address
 
-    async def run_connected(self, device) -> None:
+    async def run_connected(self, address: str, name: str) -> None:
+        """Hold one connection, answering every notification with a poll.
+
+        `address` is passed to bleak as a string on purpose: this pad
+        advertises intermittently, so a BLEDevice snapshot taken by an earlier
+        scan is often already stale and BlueZ times out connecting to it. Given
+        an address, bleak re-resolves the device at connect time instead.
+        """
         notify_event = asyncio.Event()
         counter = {"n": 0}
-        if device.address != self.address:
+        if address != self.address:
             # A different pad: its counters are unrelated to the last ones.
-            self.address = device.address
+            self.address = address
             self.counters = None
             self.session_id = None
             self.last_reading = None
@@ -370,9 +382,9 @@ class Collector:
                 self.on_reading(reading)
             notify_event.set()
 
-        async with BleakClient(device, timeout=CONNECT_TIMEOUT) as client:
-            self.device_name = device.name or device.address
-            log.info("Connected to %s (%s)", self.device_name, self.address)
+        async with BleakClient(address, timeout=CONNECT_TIMEOUT) as client:
+            self.device_name = name
+            log.info("Connected to %s (%s)", self.device_name, address)
             await client.start_notify(ba04.CHARACTERISTIC_NOTIFY_BA04_UUID, on_notify)
             self.last_packet = time.time()
 
@@ -387,8 +399,8 @@ class Collector:
             self.write_status(force=True, connected=True)
 
             while client.is_connected and self.link_is_live():
-                if self.reload_config_if_changed() and not self.is_selected(device):
-                    log.info("Selection changed, dropping %s", device.address)
+                if self.reload_config_if_changed() and not self.is_selected(address):
+                    log.info("Selection changed, dropping %s", address)
                     return
                 self.maybe_rebuild_rollup()
                 notify_event.clear()
@@ -410,9 +422,9 @@ class Collector:
     def link_is_live(self) -> bool:
         return time.time() - self.last_packet < LINK_LOST_AFTER
 
-    def is_selected(self, device) -> bool:
+    def is_selected(self, address: str) -> bool:
         pinned = self.pinned_address
-        return not pinned or device.address.lower() == pinned
+        return not pinned or address.lower() == pinned
 
     async def cleanup(self) -> None:
         self.last_reading = None
@@ -426,11 +438,11 @@ class Collector:
             self.maybe_rebuild_rollup()
             self.reload_config_if_changed()
             try:
-                device = await self.scan_for_pad()
-                if device is None:
+                found = await self.scan_for_pad()
+                if found is None:
                     await asyncio.sleep(RETRY_DELAY)
                     continue
-                await self.run_connected(device)
+                await self.run_connected(*found)
             except asyncio.CancelledError:
                 raise
             except Exception:
