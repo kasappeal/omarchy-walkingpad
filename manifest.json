@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "msegoviadev.walkingpad",
-  "name": "WalkingPad",
+  "id": "io.github.kasappeal.omarchy-walkingpad-ba04",
+  "name": "WalkingPad BA04",
   "version": "1.0.1",
-  "author": "msegoviadev",
+  "author": "kasappeal",
   "license": "MIT",
-  "description": "KingSmith WalkingPad steps in the bar, with a GitHub-style history popup",
+  "description": "Superun BA04 treadmill calories in the bar, with a GitHub-style history popup",
   "kinds": [
     "bar-widget"
   ],
@@ -13,24 +13,24 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "WalkingPad",
-    "description": "Daily steps from your KingSmith WalkingPad, goal tracking and history",
+    "displayName": "WalkingPad BA04",
+    "description": "Daily calories from your Superun BA04 pad, goal tracking and history",
     "category": "Health",
     "allowMultiple": false,
     "defaultSection": "center",
     "defaults": {
-      "goalSteps": 0,
+      "goalCalories": 0,
       "units": "Auto"
     },
     "schema": [
       {
-        "key": "goalSteps",
+        "key": "goalCalories",
         "type": "integer",
-        "label": "Daily step goal",
-        "description": "Steps per day that count as a goal-met day. 0 disables the goal.",
+        "label": "Daily calorie goal",
+        "description": "Kilocalories per day that count as a goal-met day. 0 disables the goal.",
         "min": 0,
-        "max": 100000,
-        "step": 500,
+        "max": 10000,
+        "step": 50,
         "defaultValue": 0
       },
       {

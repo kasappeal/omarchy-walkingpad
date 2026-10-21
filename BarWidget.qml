@@ -2,12 +2,12 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// Bar slot for the WalkingPad widget. The popup lives in Panel.qml, loaded
+// Bar slot for the WalkingPad BA04 widget. The popup lives in Panel.qml, loaded
 // alongside so the bar slot stays a thin shell-routing surface, matching the
 // stock weather widget's split.
 BarWidget {
   id: root
-  moduleName: "msegoviadev.walkingpad"
+  moduleName: "io.github.kasappeal.omarchy-walkingpad-ba04"
 
   function injectPanel() {
     var target = panelLoader.item
@@ -69,13 +69,13 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: panelLoader.item ? panelLoader.item.barText : "󰜎"
+    text: panelLoader.item ? panelLoader.item.barText : "󰈸"
     fontSize: Style.font.bodySmall
     horizontalMargin: 8.5
     dimmed: panelLoader.item ? !panelLoader.item.enabled : false
     active: panelLoader.item ? panelLoader.item.goalMet : false
     activeColor: Color.accent
-    tooltipText: panelLoader.item ? panelLoader.item.tooltipText : "WalkingPad"
+    tooltipText: panelLoader.item ? panelLoader.item.tooltipText : "WalkingPad BA04"
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.toggleEnabled()

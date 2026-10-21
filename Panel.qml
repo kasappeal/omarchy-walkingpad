@@ -6,12 +6,12 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// WalkingPad popup: today's progress, GitHub-style history graph, goal editor
-// and the collector enable/disable switch. All data comes from stats.py; the
-// QML stays a dumb renderer over its JSON.
+// WalkingPad BA04 popup: today's calories, GitHub-style history graph, goal
+// editor and the collector enable/disable switch. All data comes from stats.py;
+// the QML stays a dumb renderer over its JSON.
 Panel {
   id: root
-  moduleName: "msegoviadev.walkingpad"
+  moduleName: "io.github.kasappeal.omarchy-walkingpad-ba04"
   manageIpc: false
 
   property var anchorItem: null
@@ -25,8 +25,8 @@ Panel {
 
   readonly property string homeDir: Quickshell.env("HOME")
   readonly property string backendDir: Qt.resolvedUrl("backend").toString().replace("file://", "")
-  readonly property string venvPython: homeDir + "/.local/share/walkingpad/venv/bin/python"
-  readonly property int goalSteps: Math.max(0, Number(setting("goalSteps", 0)) || 0)
+  readonly property string venvPython: homeDir + "/.local/share/walkingpad-ba04/venv/bin/python"
+  readonly property int goalCalories: Math.max(0, Number(setting("goalCalories", 0)) || 0)
   readonly property bool imperial: Model.useImperial(setting("units", "Auto"), Qt.locale().name)
   readonly property int gridWeeks: 15
   readonly property int cellSize: 18
@@ -40,34 +40,49 @@ Panel {
   property var months: []
   readonly property var weekdays: Model.weekdayLabels()
   property var hovered: null
-  property int prevTodaySteps: 0
-  property int celebratedSteps: 0
+  property int prevTodayCalories: 0
+  property int celebratedCalories: 0
   property double nowMs: Date.now()
   property bool padPickerOpen: false
 
   readonly property bool enabled: stats ? stats.enabled === true : false
   readonly property bool connected: stats ? stats.connected === true : false
   readonly property bool walking: stats ? stats.walking === true : false
-  readonly property int todaySteps: stats ? Number(stats.today.steps) || 0 : 0
-  readonly property bool goalMet: goalSteps > 0 && todaySteps >= goalSteps
-  readonly property real goalProgress: goalSteps > 0 ? Math.min(1, todaySteps / goalSteps) : 0
+  readonly property int todayCalories: stats ? Number(stats.today.calories) || 0 : 0
+  readonly property bool goalMet: goalCalories > 0 && todayCalories >= goalCalories
+  readonly property real goalProgress: goalCalories > 0 ? Math.min(1, todayCalories / goalCalories) : 0
+
+  // Popup status line, in pad-state priority order.
+  readonly property string statusLine: {
+    if (!stats) return ""
+    if (!connected) return "Pad off, collector watching"
+    var live = stats.live
+    var state = live ? String(live.state || "") : ""
+    if (live && (state === "running" || walking)) {
+      return "Walking · " + Model.fmtSpeed(live.speed, imperial) + " · "
+        + Model.fmtDist(live.dist_m, imperial) + " · " + Model.fmtTime(sessionSeconds)
+    }
+    if (state === "paused") return "Paused · belt held"
+    if (state === "countdown") return "Starting…"
+    return "Pad on, belt idle"
+  }
   readonly property int sessionSeconds: {
     if (!walking || !stats || !stats.live || !stats.live.session_start) return 0
     return Math.max(0, Math.floor((nowMs - Number(stats.live.session_start) * 1000) / 1000))
   }
 
   readonly property string barText: {
-    var icon = walking ? "󰷺" : "󰜎"
+    var icon = walking ? "󰜎" : "󰈸"
     if (!enabled) return icon
-    if (goalSteps > 0) return icon + " " + Model.fmt(todaySteps) + "/" + Model.fmt(goalSteps)
-    return icon + " " + Model.fmt(todaySteps)
+    if (goalCalories > 0) return icon + " " + Model.fmt(todayCalories) + "/" + Model.fmt(goalCalories)
+    return icon + " " + Model.fmt(todayCalories)
   }
 
   readonly property string tooltipText: {
-    if (!stats) return "WalkingPad"
-    if (!enabled) return "WalkingPad collector is off\nClick: details · Right-click: enable"
-    var text = "WalkingPad · " + Model.fmt(todaySteps) + " steps today"
-    if (goalSteps > 0) text += " (goal " + Model.fmt(goalSteps) + ")"
+    if (!stats) return "WalkingPad BA04"
+    if (!enabled) return "WalkingPad BA04 collector is off\nClick: details · Right-click: enable"
+    var text = "WalkingPad BA04 · " + Model.fmt(todayCalories) + " kcal today"
+    if (goalCalories > 0) text += " (goal " + Model.fmt(goalCalories) + " kcal)"
     if (walking) text += "\nWalking now"
     return text + "\nClick: details · Right-click: " + (enabled ? "disable" : "enable")
   }
@@ -95,14 +110,14 @@ Panel {
   }
 
   function toggleEnabled() {
-    toggleProc.command = ["systemctl", "--user", enabled ? "stop" : "start", "walkingpad.service"]
+    toggleProc.command = ["systemctl", "--user", enabled ? "stop" : "start", "walkingpad-ba04.service"]
     toggleProc.running = true
   }
 
   function saveGoal(text) {
     var n = parseInt(text, 10)
     if (isNaN(n) || n < 0) n = 0
-    setGoalProc.command = ["omarchy-shell", "shell", "setBarWidget", "msegoviadev.walkingpad", "goalSteps", String(n), "{}"]
+    setGoalProc.command = ["omarchy-shell", "shell", "setBarWidget", "io.github.kasappeal.omarchy-walkingpad-ba04", "goalCalories", String(n), "{}"]
     setGoalProc.running = true
   }
 
@@ -128,20 +143,20 @@ Panel {
     return "scanning..."
   }
 
-  onTodayStepsChanged: {
+  onTodayCaloriesChanged: {
     // Celebrate only a fresh crossing: a previous reading below the goal must
     // exist, so opening the bar with the goal already met stays quiet. Capture
     // the count now so the toast cannot race a later poll and under-report.
-    if (goalSteps > 0 && prevTodaySteps > 0 && prevTodaySteps < goalSteps && todaySteps >= goalSteps) {
-      root.celebratedSteps = todaySteps
+    if (goalCalories > 0 && prevTodayCalories > 0 && prevTodayCalories < goalCalories && todayCalories >= goalCalories) {
+      root.celebratedCalories = todayCalories
       celebrateProc.running = true
     }
-    prevTodaySteps = todaySteps
+    prevTodayCalories = todayCalories
   }
 
   Process {
     id: statsProc
-    command: [root.venvPython, root.backendDir + "/stats.py", "--goal", String(root.goalSteps)]
+    command: [root.venvPython, root.backendDir + "/stats.py", "--goal", String(root.goalCalories)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -150,10 +165,10 @@ Panel {
         try {
           root.stats = JSON.parse(raw)
           root.nowMs = Date.now()
-          root.cells = Model.buildCells(root.stats.start, root.stats.days, root.goalSteps, root.gridWeeks)
+          root.cells = Model.buildCells(root.stats.start, root.stats.days, root.goalCalories, root.gridWeeks)
           root.months = Model.monthLabels(root.stats.start, root.gridWeeks)
         } catch (e) {
-          console.warn("walkingpad: stats parse failed: " + e)
+          console.warn("walkingpad-ba04: stats parse failed: " + e)
         }
       }
     }
@@ -166,9 +181,9 @@ Panel {
     id: celebrateProc
     // Clicking the toast opens the popup (the shell keeps and runs the
     // command, so this survives shell restarts).
-    command: ["omarchy-notification-send", "-g", "󰜎",
-      "--exec", "omarchy-shell shell summon msegoviadev.walkingpad '{}'",
-      "Walking goal reached", Model.fmt(root.celebratedSteps) + " steps today"]
+    command: ["omarchy-notification-send", "-g", "󰈸",
+      "--exec", "omarchy-shell shell summon io.github.kasappeal.omarchy-walkingpad-ba04 '{}'",
+      "Calorie goal reached", Model.fmt(root.celebratedCalories) + " kcal today"]
   }
 
   Timer {
@@ -232,7 +247,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.walking ? "󰷺" : "󰜎"
+                text: root.walking ? "󰜎" : "󰈸"
                 color: root.goalMet ? root.accent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: 44
@@ -245,7 +260,7 @@ Panel {
                 Row {
                   spacing: Style.space(6)
                   Text {
-                    text: Model.fmt(root.todaySteps)
+                    text: Model.fmt(root.todayCalories)
                     color: root.goalMet ? root.accent : root.foreground
                     font.family: root.fontFamily
                     font.pixelSize: 36
@@ -254,7 +269,7 @@ Panel {
                   Text {
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 6
-                    text: root.goalSteps > 0 ? "/ " + Model.fmt(root.goalSteps) : "steps today"
+                    text: root.goalCalories > 0 ? "/ " + Model.fmt(root.goalCalories) : "kcal today"
                     color: root.muted
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.caption
@@ -263,9 +278,7 @@ Panel {
 
                 Text {
                   visible: root.enabled
-                  text: !root.connected ? "Pad off, collector watching"
-                    : root.walking ? "Walking · " + Model.fmtSpeed(root.stats.live.speed, root.imperial) + " · " + Model.fmtDist(root.stats.live.dist_m, root.imperial) + " · " + Model.fmtTime(root.sessionSeconds)
-                    : "Pad on, belt idle"
+                  text: root.statusLine
                   color: root.walking ? root.accent : root.muted
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
@@ -289,7 +302,7 @@ Panel {
 
               Text {
                 anchors.right: parent.right
-                text: root.stats && root.stats.streak > 0 ? "󰈸 " + root.stats.streak + " day streak" : ""
+                text: root.stats && root.stats.streak > 0 ? "󰔵 " + root.stats.streak + " day streak" : ""
                 color: root.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -297,7 +310,7 @@ Panel {
               }
               Text {
                 anchors.right: parent.right
-                text: root.stats ? Model.fmt(root.stats.totals.steps) + " steps all time" : ""
+                text: root.stats ? Model.fmtKcal(root.stats.totals.calories) + " all time" : ""
                 color: root.muted
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -314,7 +327,7 @@ Panel {
 
           // ---- Goal progress bar.
           Rectangle {
-            visible: root.goalSteps > 0
+            visible: root.goalCalories > 0
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.leftMargin: Style.space(16)
@@ -427,8 +440,8 @@ Panel {
             height: Math.ceil(Style.font.caption * 2.5)
             verticalAlignment: Text.AlignTop
             lineHeight: 1.25
-            text: root.hovered ? Model.dayLabel(root.hovered, root.goalSteps, root.imperial)
-              : root.goalSteps > 0 ? "Bright cells are days the goal was met"
+            text: root.hovered ? Model.dayLabel(root.hovered, root.goalCalories, root.imperial)
+              : root.goalCalories > 0 ? "Bright cells are days the goal was met"
               : "Set a daily goal below to light up goal days"
             color: root.muted
             font.family: root.fontFamily
@@ -603,7 +616,7 @@ Panel {
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Daily goal"
+                text: "Daily calorie goal"
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -613,13 +626,13 @@ Panel {
                 id: goalField
                 width: 90
                 anchors.verticalCenter: parent.verticalCenter
-                placeholderText: root.goalSteps > 0 ? String(root.goalSteps) : "6000"
+                placeholderText: root.goalCalories > 0 ? String(root.goalCalories) : "200"
                 text: ""
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 inputMethodHints: Qt.ImhDigitsOnly
-                validator: IntValidator { bottom: 0; top: 100000 }
+                validator: IntValidator { bottom: 0; top: 10000 }
                 onAccepted: {
                   root.saveGoal(text)
                   text = ""

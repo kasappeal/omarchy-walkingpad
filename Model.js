@@ -1,4 +1,5 @@
-// Pure helpers for the WalkingPad widget. No QML dependencies beyond Qt.
+// Pure helpers for the WalkingPad BA04 widget
+// (io.github.kasappeal.omarchy-walkingpad-ba04). No QML dependencies beyond Qt.
 
 var KM_PER_MI = 1.609344
 var FT_PER_M = 3.28084
@@ -56,6 +57,11 @@ function fmtSpeed(kmh, imperial) {
   return kmh.toFixed(1) + " km/h"
 }
 
+// One-line calorie readout, e.g. "1,234 kcal".
+function fmtKcal(n) {
+  return fmt(n) + " kcal"
+}
+
 function pad2(n) {
   return (n < 10 ? "0" : "") + n
 }
@@ -73,7 +79,7 @@ function todayIso() {
   return isoOf(new Date())
 }
 
-// Cell states: 0 = no steps, 1 = below goal (or walked, no goal set),
+// Cell states: 0 = no calories, 1 = below goal (or walked, no goal set),
 // 2 = goal met, 3 = future day.
 // Returned row-major: index = weekday row (0=Mon) * weeks + week column,
 // matching a Grid with LeftToRight flow and `columns: weeks`.
@@ -86,15 +92,15 @@ function buildCells(startIso, days, goal, weeks) {
       var d = new Date(start.getTime())
       d.setDate(d.getDate() + col * 7 + row)
       var iso = isoOf(d)
-      var steps = days[iso] ? Number(days[iso].steps) || 0 : 0
+      var calories = days[iso] ? Number(days[iso].calories) || 0 : 0
       var state
       if (iso > today) state = 3
-      else if (steps <= 0) state = 0
-      else if (goal > 0 && steps >= goal) state = 2
+      else if (calories <= 0) state = 0
+      else if (goal > 0 && calories >= goal) state = 2
       else state = 1
       cells.push({
         date: iso,
-        steps: steps,
+        calories: calories,
         state: state,
         today: iso === today,
         stats: days[iso] || null
@@ -133,14 +139,14 @@ function weekdayLabels() {
   return labels
 }
 
-// Hover readout under the history graph. Line 1 is date and steps (plus the
-// goal when set); line 2 lists whatever metrics the day carries, so days
-// recovered from pad "final" summaries (no speed data) render cleanly.
+// Hover readout under the history graph. Line 1 is date and calories (plus
+// the goal when set); line 2 lists whatever metrics the day carries, so days
+// with no speed samples (median/max null) render cleanly.
 function dayLabel(cell, goal, imperial) {
-  var line = Qt.formatDateTime(parseIso(cell.date), "ddd, MMM d") + ": " + fmt(cell.steps) + " steps"
+  var line = Qt.formatDateTime(parseIso(cell.date), "ddd, MMM d") + ": " + fmtKcal(cell.calories)
   if (goal > 0) line += " / " + fmt(goal)
   var s = cell.stats
-  if (!s || cell.steps <= 0) return line
+  if (!s || cell.calories <= 0) return line
   var parts = []
   if (Number(s.dist_m) > 0) parts.push(fmtDist(s.dist_m, imperial))
   if (Number(s.time_s) > 0) parts.push(fmtTime(s.time_s))
