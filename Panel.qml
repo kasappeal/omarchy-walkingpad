@@ -44,6 +44,28 @@ Panel {
   property int prevTodayCalories: 0
   property int celebratedCalories: 0
   property double nowMs: Date.now()
+
+  // ---- Belt control state
+  // Controls appear only while the collector holds a live connection, so there
+  // is never a dead button that looks like it should have worked.
+  readonly property bool canControl: root.enabled && !!(stats && stats.connected)
+  readonly property bool beltMoving: !!(stats && stats.walking)
+  readonly property string speedText: {
+    if (!stats || !stats.live) return ""
+    return Model.fmtSpeed(Number(stats.live.target_speed) || 0, imperial)
+  }
+  readonly property var controlButtons: [
+    {action: beltMoving ? "stop" : "start", label: beltMoving ? "Stop" : "Start"},
+    {action: "speed_down", label: "−"},
+    {action: "speed_up", label: "+"},
+  ]
+  // A command the pad could not honour, shown briefly next to the buttons.
+  readonly property string commandNote: {
+    var cmd = stats && stats.live ? stats.live.last_command : null
+    if (!cmd || cmd.ok) return ""
+    if (nowMs / 1000 - Number(cmd.at) > 15) return ""
+    return String(cmd.error || "refused")
+  }
   property bool padPickerOpen: false
 
   readonly property bool enabled: stats ? stats.enabled === true : false
@@ -113,6 +135,11 @@ Panel {
     if (!statsProc.running) statsProc.running = true
   }
 
+  function sendControl(action) {
+    controlProc.command = [root.venvPython, root.backendDir + "/control.py", action]
+    controlProc.running = true
+  }
+
   function toggleEnabled() {
     toggleProc.command = ["systemctl", "--user", enabled ? "stop" : "start", "walkingpad-ba04.service"]
     toggleProc.running = true
@@ -179,6 +206,7 @@ Panel {
   }
 
   Process { id: toggleProc; onExited: refreshDelay.start() }
+  Process { id: controlProc; onExited: refreshDelay.start() }
   Process { id: selectProc; onExited: refreshDelay.start() }
   Process { id: setGoalProc }
   Process {
@@ -595,6 +623,75 @@ Panel {
                   }
                 }
               }
+            }
+          }
+
+          // ---- Belt control. The widget never touches Bluetooth itself: it
+          // drops a request that the collector answers in place of its next
+          // heartbeat, because the pad serves one connection at a time.
+          Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 1
+            visible: root.canControl
+            color: root.alpha(root.foreground, 0.12)
+          }
+
+          Row {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: Style.space(16)
+            anchors.rightMargin: Style.space(16)
+            spacing: Style.space(10)
+            visible: root.canControl
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.speedText + (root.beltMoving ? " · belt moving" : " · belt idle")
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Repeater {
+              model: root.controlButtons
+              delegate: Rectangle {
+                id: controlButton
+                required property var modelData
+                anchors.verticalCenter: parent.verticalCenter
+                width: controlLabel.implicitWidth + 20
+                height: 28
+                radius: 6
+                color: controlMouse.containsMouse
+                  ? root.alpha(root.accent, 0.25)
+                  : root.alpha(root.accent, 0.12)
+
+                Text {
+                  id: controlLabel
+                  anchors.centerIn: parent
+                  text: controlButton.modelData.label
+                  color: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                MouseArea {
+                  id: controlMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.sendControl(controlButton.modelData.action)
+                }
+              }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.commandNote !== ""
+              text: root.commandNote
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
             }
           }
 

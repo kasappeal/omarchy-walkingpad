@@ -17,6 +17,13 @@ tracking, and a GitHub-style history graph. All data stays on your machine.
   (speed / distance / session time), a 15-week contribution graph where goal
   days glow in your theme's accent color, hover any day for its exact count,
   streak and all-time totals.
+- **Belt control**: Start, Stop and ±0.1 km/h buttons in the popup. Start
+  always begins at 1.0 km/h (the lowest speed this firmware accepts), speed
+  changes are clamped to the ceiling the pad itself reports, and a command
+  that arrives while the pad is unreachable is dropped rather than queued, so
+  the belt never starts after you have already walked away. The pad serves one
+  BLE client at a time, so controlling it means the collector is connected and
+  the phone app is not.
 - **Daily calorie goal**: set it in the popup; crossing it mid-walk fires a
   desktop notification.
 - **Enable/disable switch**: right-click the widget (or use the popup button)
@@ -99,6 +106,8 @@ layout and widget settings.
 | Action | Result |
 |--------|--------|
 | Left-click widget | Open/close the history popup |
+| `Start` / `Stop` in the popup | Start the belt at 1.0 km/h / end the workout |
+| `−` / `+` in the popup | Step the target speed by 0.1 km/h |
 | Right-click widget | Enable/disable the collector |
 | Middle-click widget | Refresh stats |
 | Walk | Everything else happens by itself |

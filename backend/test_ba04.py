@@ -15,6 +15,8 @@ import json
 import os
 import sys
 import tempfile
+import time
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -123,6 +125,7 @@ def make_collector(tmp, record_interval=5.0):
     collector.HISTORY_FILE = tmp / "history.jsonl"
     collector.STATUS_FILE = tmp / "status.json"
     collector.DEVICES_FILE = tmp / "devices.json"
+    collector.CONTROL_FILE = tmp / "control.json"
     rollup.DATA_DIR = tmp
     rollup.HISTORY_FILE = tmp / "history.jsonl"
     rollup.ROLLUP_FILE = tmp / "rollup.json"
@@ -358,6 +361,142 @@ def test_named_pad_outranks_a_service_only_neighbour():
     assert ranked is pad, "the named pad wins even when much quieter"
     # ... and an unnamed pad on the service still qualifies at all
     assert collector.is_candidate(None, [ba04.SERVICE_BA04_UUID]) is True
+
+
+def test_commands_match_upstream_vectors():
+    """Every command frame, byte for byte.
+
+    These hex strings are the output of the reverse-engineering reference
+    encoder (confirmed working against a real PitPat-T01), captured once here
+    so this port cannot drift without anyone noticing. They cover the three
+    belt commands, the acceleration-ramp difference between starting and
+    re-targeting, and both panel units, where mph sets bit 3 of the command
+    byte and carries the speed in thousandths of mph instead of km/h.
+    """
+    vectors = [
+        ("start", "4d0007176a170000000003e801005000040000000dba9d76ef1a43", False),
+        ("stop", "4d0007176a1700000000000001005000000000000dba9d76eff543", False),
+        ("pause", "4d0007176a1700000000000001005000020000000dba9d76eff743", False),
+        ("start", "4d0007176a170000000003e8010050000c0000000dba9d76ef1243", True),
+        ("stop", "4d0007176a1700000000000001005000080000000dba9d76effd43", True),
+        ("pause", "4d0007176a17000000000000010050000a0000000dba9d76efff43", True),
+        ("speed 1.0", "4d0007176a170000000003e805005000040000000dba9d76ef1e43", False),
+        ("speed 4.5", "4d0007176a1700000000119405005000040000000dba9d76ef7043", False),
+        ("speed 6.0", "4d0007176a1700000000177005005000040000000dba9d76ef9243", False),
+        ("speed 4.5", "4d0007176a17000000000aec050050000c0000000dba9d76ef1b43", True),
+    ]
+    builders = {
+        "start": lambda imperial: ba04.start_frame(7, imperial=imperial),
+        "stop": lambda imperial: ba04.stop_frame(7, imperial=imperial),
+        "pause": lambda imperial: ba04.pause_frame(7, imperial=imperial),
+        "speed 1.0": lambda imperial: ba04.speed_frame(7, 1.0, imperial=imperial),
+        "speed 4.5": lambda imperial: ba04.speed_frame(7, 4.5, imperial=imperial),
+        "speed 6.0": lambda imperial: ba04.speed_frame(7, 6.0, imperial=imperial),
+    }
+    for name, expected, imperial in vectors:
+        frame = builders[name](imperial)
+        assert frame.hex() == expected, f"{name} imperial={imperial}: {frame.hex()}"
+        assert frame[0] == 0x4D and frame[3] == len(frame) - 4, name
+
+
+def test_heartbeat_frame_is_untouched_by_the_command_port():
+    # The pad answered 538 captured packets to this exact byte string; the
+    # command layer had to share the framing helper without changing it.
+    assert ba04.poll_frame(0).hex() == "4d0000056a05fdf843"
+    assert ba04.poll_frame(255).hex() == "4d00ff056a05fdf843"
+
+
+def test_speed_clamps_to_the_pads_own_ceiling():
+    assert ba04.clamp_speed(3.0, 6.0) == 3.0
+    assert ba04.clamp_speed(9.0, 6.0) == 6.0, "never above what the pad reports"
+    assert ba04.clamp_speed(0.2, 6.0) == 1.0, "never below its minimum"
+    assert ba04.clamp_speed(3.04, 6.0) == 3.0, "snapped to the panel's 0.1 grid"
+    assert ba04.clamp_speed(3.0, 0) == 3.0, "unknown ceiling falls back to the default"
+    assert ba04.clamp_speed(20.0, 0) == 6.0
+
+
+def test_control_requests():
+    """The widget writes control.json; the collector consumes exactly one
+    request per heartbeat and turns it into the upstream-verified frame."""
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, _clock = make_collector(tmp)
+        c.max_speed = 6.0
+
+        def write_request(action, age=0.0):
+            (tmp / "control.json").write_text(
+                json.dumps({"action": action, "requested_at": time.time() - age})
+            )
+
+        assert c.pending_command() is None, "no file, no command"
+
+        write_request("start")
+        request = c.pending_command()
+        assert request["action"] == "start", request
+        assert not (tmp / "control.json").exists(), "the request is consumed"
+        assert c.control_frame(request, 7) == ba04.start_frame(7)
+
+        write_request("stop")
+        assert c.control_frame(c.pending_command(), 8) == ba04.stop_frame(8)
+
+        write_request("start", age=999)
+        assert c.pending_command() is None, "a stale request must never fire"
+        assert not (tmp / "control.json").exists(), "stale requests are cleared too"
+        assert c.last_command["error"] == "stale", c.last_command
+
+
+def test_speed_step_uses_the_pads_own_numbers():
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, _clock = make_collector(tmp)
+        c.max_speed = 6.0
+        c.last_reading = reading(ba04.STATE_RUNNING, 5, 60.0, 300, speed=4.5)
+
+        request = {"action": "speed_up"}
+        assert c.control_frame(request, 9) == ba04.speed_frame(9, 4.6, imperial=False)
+        assert c.pending_speed == 4.6, c.pending_speed
+
+        c.control_frame({"action": "speed_down"}, 10)
+        assert c.pending_speed == 4.4, c.pending_speed
+
+        # At the ceiling the pad still gets a command, clamped, rather than a
+        # silently increasing target it can never reach.
+        c.last_reading = reading(ba04.STATE_RUNNING, 5, 60.0, 300, speed=6.0)
+        c.control_frame({"action": "speed_up"}, 11)
+        assert c.pending_speed == 6.0, c.pending_speed
+
+
+def test_speed_command_refused_while_the_belt_is_stopped():
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, _clock = make_collector(tmp)
+        c.max_speed = 6.0
+        c.last_reading = reading(ba04.STATE_STOPPED, 0, 0.0, 0)
+        assert c.control_frame({"action": "speed_up"}, 3) is None
+        assert c.last_command["error"] == "belt stopped", c.last_command
+
+
+def test_speed_follows_the_pads_panel_unit():
+    """A pad configured for mph expects mph in the command, with bit 3 set."""
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, _clock = make_collector(tmp)
+        c.max_speed = 6.0
+        c.last_reading = reading(ba04.STATE_RUNNING, 5, 60.0, 300, speed=4.5)
+        c.last_reading = replace(c.last_reading, imperial=True)
+        frame = c.control_frame({"action": "speed_up"}, 4)
+        assert frame == ba04.speed_frame(4, c.pending_speed, imperial=True), frame.hex()
+
+
+def test_status_reports_the_last_command():
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, _clock = make_collector(tmp)
+        c.last_command = {"action": "start", "speed": None, "ok": True, "at": time.time()}
+        c.address = "AA:BB:CC:DD:EE:FF"
+        c.write_status(reading(ba04.STATE_RUNNING, 1, 10.0, 60), connected=True, force=True)
+        status = json.loads((tmp / "status.json").read_text())
+        assert status["last_command"]["action"] == "start", status
 
 
 def main():

@@ -9,7 +9,7 @@ the collector's live status, and prints one JSON blob:
     "connected": bool, "walking": bool,      # live pad state (fresh only)
     "live":      {"calories", "dist_m", "time_s", "speed", "target_speed",
                   "state", "max_speed", "firmware", "session_start",
-                  "device_name", "address"},
+                  "device_name", "address", "last_command"},
     "today":     {"calories", "dist_m", "time_s", "sessions", ...},
     "start":     "YYYY-MM-DD",               # Monday of the first grid week
     "days":      {"YYYY-MM-DD": {"calories", "dist_m", "time_s", "sessions",
@@ -186,6 +186,7 @@ def main() -> None:
                 "session_start": live.get("session_start"),
                 "device_name": live.get("device_name", ""),
                 "address": live.get("address", ""),
+                "last_command": live.get("last_command"),
             }
             if live
             else None,

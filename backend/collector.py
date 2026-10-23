@@ -24,6 +24,8 @@ Data layout:
   ~/.local/share/walkingpad-ba04/status.json    live state, rewritten atomically
   ~/.local/share/walkingpad-ba04/devices.json   candidate pads seen while scanning
   ~/.local/share/walkingpad-ba04/rollup.json    per-day stats for all but today
+  ~/.local/share/walkingpad-ba04/control.json   one belt request from the widget,
+      consumed and removed by the next heartbeat; {"action", "requested_at"}
 
 History record type:
   {"ts", "session", "calories", "dist_m", "time_s", "speed", "state"}
@@ -55,6 +57,7 @@ DATA_DIR = Path.home() / ".local" / "share" / "walkingpad-ba04"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 STATUS_FILE = DATA_DIR / "status.json"
 DEVICES_FILE = DATA_DIR / "devices.json"
+CONTROL_FILE = DATA_DIR / "control.json"  # written by the widget, consumed here
 CONFIG_FILE = Path.home() / ".config" / "walkingpad-ba04" / "config.json"
 
 SCAN_TIMEOUT = 10.0
@@ -70,6 +73,7 @@ FIRST_PACKET_TIMEOUT = 10.0  # the pad speaks first after connecting; writing
 CONNECT_TIMEOUT = 12.0  # the pad advertises intermittently, so a connect can
 # simply miss its window; failing fast gets us back to scanning sooner
 HEARTBEAT_WAIT = 0.3  # answer a notification, or poll again after this
+CONTROL_STALE_AFTER = 10.0  # a belt command this old is dropped, not sent
 MAX_STATE_BYTES = 64 * 1024  # status, devices, config are all tiny by design
 MAX_NAME_LENGTH = 64  # BLE names are short; cap before storage and QML
 
@@ -139,7 +143,9 @@ class Collector:
         self.last_reading: ba04.Reading | None = None
         self.last_record_key: tuple | None = None
         self.last_record_time = 0.0
+        self.pending_speed: float | None = None
         self.last_status_write = 0.0
+        self.last_command: dict | None = None
         self.rollup_day: date | None = None
 
     @property
@@ -188,12 +194,75 @@ class Collector:
             "speed": reading.speed if reading else 0.0,
             "target_speed": reading.target_speed if reading else 0.0,
             "session_start": self.session_start if self.session_id else None,
+            "last_command": self.last_command,
             "ts": now,
         }
         try:
             safeio.atomic_write(STATUS_FILE, json.dumps(payload, separators=(",", ":")))
         except OSError:
             log.exception("Failed to write status")
+
+    def pending_command(self) -> dict | None:
+        """Consume the control request the widget may have written.
+
+        The file is removed before the command is sent, and a request older
+        than CONTROL_STALE_AFTER is dropped rather than sent. Both choices
+        favour the same thing: a belt must never start late. The pad is only
+        reachable between link drops, so a queued command can otherwise sit
+        until the next workout and fire when nobody is standing on the pad.
+        """
+        request = safeio.read_json(CONTROL_FILE, MAX_STATE_BYTES)
+        if not isinstance(request, dict) or not request.get("action"):
+            return None
+        self.clear_control()
+        age = time.time() - float(request.get("requested_at", 0))
+        if age > CONTROL_STALE_AFTER:
+            log.info("Dropping stale %s command (%.0fs old)", request["action"], age)
+            self.last_command = {
+                "action": str(request["action"]),
+                "ok": False,
+                "error": "stale",
+                "at": time.time(),
+            }
+            return None
+        return request
+
+    def control_frame(self, request: dict, counter: int) -> bytes | None:
+        """Build the frame for a control request, or None to reject it.
+
+        Speed changes only make sense to a belt that is moving; on a stopped
+        pad they are refused so the widget can say why instead of silently
+        doing nothing.
+        """
+        action = str(request.get("action"))
+        reading = self.last_reading
+        imperial = bool(reading.imperial) if reading else False
+        if action == "start":
+            return ba04.start_frame(counter, imperial=imperial)
+        if action == "stop":
+            return ba04.stop_frame(counter, imperial=imperial)
+        if action in ("speed_up", "speed_down"):
+            if not reading or reading.state != ba04.STATE_RUNNING:
+                self.last_command = {
+                    "action": action,
+                    "ok": False,
+                    "error": "belt stopped",
+                    "at": time.time(),
+                }
+                return None
+            step = ba04.SPEED_STEP_KMH if action == "speed_up" else -ba04.SPEED_STEP_KMH
+            base = reading.target_speed or reading.speed
+            speed = ba04.clamp_speed(base + step, self.max_speed)
+            self.pending_speed = speed
+            return ba04.speed_frame(counter, speed, imperial=imperial)
+        log.info("Ignoring unknown control action %r", action)
+        return None
+
+    def clear_control(self) -> None:
+        try:
+            CONTROL_FILE.unlink(missing_ok=True)
+        except OSError:
+            log.exception("Failed to clear control request")
 
     def remember_devices(self, candidates: list) -> None:
         """Update the seen-pads registry consumed by the widget's picker."""
@@ -440,13 +509,30 @@ class Collector:
                     return
                 self.maybe_rebuild_rollup()
                 notify_event.clear()
+                # A control request takes the place of the next heartbeat, on
+                # the same counter: the pad tracks one sequence across both, so
+                # a command sent out of turn makes it stop answering.
+                request = self.pending_command()
+                frame = self.control_frame(request, counter["n"]) if request else None
+                commanding = frame is not None
+                if frame is None:
+                    frame = ba04.poll_frame(counter["n"])
                 try:
                     await client.write_gatt_char(
                         ba04.CHARACTERISTIC_WRITE_BA04_UUID,
-                        ba04.poll_frame(counter["n"]),
+                        frame,
                         response=True,
                     )
                     counter["n"] = (counter["n"] + 1) & 0xFF
+                    if commanding:
+                        self.last_command = {
+                            "action": str(request.get("action")),
+                            "speed": self.pending_speed,
+                            "ok": True,
+                            "at": time.time(),
+                        }
+                        self.pending_speed = None
+                        self.write_status(force=True)
                 except (OSError, ValueError, asyncio.TimeoutError, BleakError) as error:
                     # Expected: this is how the pad ends a session.
                     log.info("Heartbeat write failed (%s)", type(error).__name__)
