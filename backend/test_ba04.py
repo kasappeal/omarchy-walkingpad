@@ -173,7 +173,7 @@ def test_session_spans_a_pause():
             clock.advance(1)
         assert c.session_id == first_session, "pause must not start a new session"
         c.on_reading(reading(ba04.STATE_STOPPED, 0, 0.0, 0))
-        assert c.session_id is None, "a stopped belt closes the epoch"
+        assert c.session_id == first_session, "a stopped belt must not close the epoch"
 
         days = rollup.aggregate_days(rollup.load_records())
         day = list(days.values())[0]
@@ -181,6 +181,47 @@ def test_session_spans_a_pause():
         assert (day["calories"], day["time_s"]) == (12, 150), day
         assert abs(day["dist_m"] - 150.0) < 0.1, day
         assert day["longest_session_s"] == 150, day
+
+
+def test_stopped_then_resumed_belt_is_one_workout():
+    """Measured on a PitPat-T01: the belt stops when nobody stands on it and the
+    pad then resumes the same counters (43 s -> 65 s). Treating the stop as the
+    end of the epoch re-counted the whole elapsed prefix on resume."""
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, clock = make_collector(tmp)
+        for step in range(1, 5):  # 40 s / 40 m / 4 kcal
+            c.on_reading(reading(ba04.STATE_RUNNING, 4, step * 10.0, step * 10, speed=3.6))
+            clock.advance(6)  # past the row throttle, as a real pad's packets are
+        c.on_reading(reading(ba04.STATE_STOPPED, 4, 40.0, 40))
+        clock.advance(6)
+        for step in range(5, 8):  # resumed on the same counters: 70 s / 70 m / 7 kcal
+            c.on_reading(reading(ba04.STATE_RUNNING, 7, step * 10.0, step * 10, speed=3.6))
+            clock.advance(6)
+        days = rollup.aggregate_days(rollup.load_records())
+        day = list(days.values())[0]
+        assert day["sessions"] == 1, day
+        assert (day["calories"], day["time_s"]) == (7, 70), day
+
+
+def test_pad_zeroing_counters_opens_a_real_new_workout():
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, clock = make_collector(tmp)
+        for step in range(1, 5):
+            c.on_reading(reading(ba04.STATE_RUNNING, 4, step * 10.0, step * 10, speed=3.6))
+            clock.advance(6)
+        c.on_reading(reading(ba04.STATE_STOPPED, 0, 0.0, 0))  # pad zeroed its counters
+        clock.advance(6)
+        first = c.session_id
+        for step in range(1, 4):
+            c.on_reading(reading(ba04.STATE_RUNNING, 3, step * 10.0, step * 10, speed=3.6))
+            clock.advance(6)
+        assert c.session_id != first, "a counter reset must start a new workout"
+        days = rollup.aggregate_days(rollup.load_records())
+        day = list(days.values())[0]
+        assert day["sessions"] == 2, day
+        assert (day["calories"], day["time_s"]) == (7, 70), day
 
 
 def test_two_workouts_are_two_sessions():

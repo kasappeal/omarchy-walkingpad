@@ -259,11 +259,13 @@ class Collector:
     def on_reading(self, reading: ba04.Reading) -> None:
         """Record one pushed status notification.
 
-        A session is the pad's own workout epoch, not a belt-active window. A
-        PAUSE holds the counters and resumes them later (measured: 63 s / 17 m /
-        1 kcal survived a 40 s pause), so the epoch stays open across it. Only
-        a STOPPED belt ends an epoch, and the pad then zeroes its counters
-        within a few seconds, so the next workout reads as a fresh one.
+        A session is the pad's own workout epoch, and the only evidence the pad
+        gives for one ending is its counters going backwards: a new workout
+        restarts them from zero. A PAUSE holds them (measured: 63 s / 17 m /
+        1 kcal survived a 40 s pause) and so does a stopped belt that later
+        resumes with nobody having stepped off, so the epoch stays open across
+        both. Closing it on a stopped belt instead split one real workout into
+        several sessions and re-counted the elapsed prefix each time.
         """
         now = time.time()
         self.last_packet = now
@@ -288,11 +290,11 @@ class Collector:
             pass  # epoch held; nothing to flush yet
         elif self.counters is not None:
             # Belt stopped: flush the workout's final counters before the pad
-            # zeroes them, then close the epoch.
+            # zeroes them, but keep the epoch open, because the pad resumes the
+            # same counters when you step back on and a genuine new workout
+            # restarts them below what we hold either way.
             if self.last_reading is not None:
                 self.record(self.last_reading, force=True)
-            self.counters = None
-            self.session_id = None
 
         self.last_reading = reading
         self.write_status(reading, connected=True)

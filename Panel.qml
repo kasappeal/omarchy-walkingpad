@@ -68,8 +68,11 @@ Panel {
     return "Pad on, belt idle"
   }
   readonly property int sessionSeconds: {
-    if (!walking || !stats || !stats.live || !stats.live.session_start) return 0
-    return Math.max(0, Math.floor((nowMs - Number(stats.live.session_start) * 1000) / 1000))
+    if (!walking || !stats || !stats.live) return 0
+    // The pad's own duration counter: unlike wall-clock time since we opened a
+    // session, it survives the belt stopping and a collector restart, and it is
+    // the number printed on the pad itself.
+    return Number(stats.live.time_s) || 0
   }
 
   readonly property string barText: {

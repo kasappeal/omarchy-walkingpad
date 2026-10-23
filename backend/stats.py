@@ -83,7 +83,7 @@ def all_days() -> dict:
     tail = load_records(since=through + timedelta(days=1))
     # Rollup and tail days are disjoint by construction (through < today),
     # so a plain update is a merge, not an overwrite.
-    days.update(aggregate_days(tail, seed_prev=rollup.get("carry", {})))
+    days.update(aggregate_days(tail, seed_carry=rollup.get("carry", {})))
     return days
 
 

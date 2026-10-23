@@ -148,9 +148,14 @@ Three consequences worth knowing:
   1 kcal per minute, so a very short session can legitimately show 0 kcal even
   though you covered distance. Distance and time are tracked alongside, so
   those sessions still appear in the popup's session stats.
-- **Counters are per-workout.** The pad zeroes calories/distance/time when a
-  new workout starts. A pause holds them, so a pause-and-resume stays one
-  session, and a reconnect in the middle of a workout does not double-count it.
+- **Counters are per-workout, and the counters themselves define the workout.**
+  The pad restarts calories/distance/time at zero when a new workout begins, so
+  a counter going backwards is the only reliable signal that a workout ended.
+  Everything else splits a workout without ending it, and the widget counts
+  deltas instead: a pause holds the counters, a belt that stops because nobody
+  stands on it resumes them (measured: 43 s continued to 65 s), and restarting
+  the collector changes nothing on the pad. Your totals therefore match the
+  number on the pad's own display, workout by workout.
 - **No pad memory.** KingSmith pads could report a last-run summary, so a
   workout walked while the collector was off could be recovered. The BA04 has
   no such readout: sessions are only saved while the collector runs.

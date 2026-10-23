@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
+#!/usr/bin/env python3
 """Per-day rollup of BA04 threadmill history.
 
 The widget only ever displays day granularity, so records older than today
@@ -12,13 +12,21 @@ The primary metric is the pad's calorie counter: a whole-kcal integer that
 ticks roughly once a minute, so a short workout can legitimately add 0 kcal
 while still adding distance and time. Day totals keep all three.
 
+Workout attribution is derived from the counters, not from the collector's
+session id, because a session id splits far more often than a workout does:
+the collector restarts when the service restarts, and the belt stops whenever
+nobody is standing on it, both times with the pad resuming the very same
+counters. Counting deltas and treating a counter *decrease* as the only
+evidence of a new workout is what keeps a workout counted exactly once.
+
 Rollup layout:
-  {"version": 2,
+  {"version": 3,
    "through": "YYYY-MM-DD",        # last fully compacted day (<= yesterday)
-   "carry": {"session": [calories, dist_m, time_s]},  # last counter values of
-                                   # sessions near the boundary, so a session
-                                   # spanning midnight is not double counted
-                                   # when the tail re-reads its counters
+   "carry": {"epoch": [calories, dist_m, time_s],   # counters of the last
+                                   # reading compacted, so a workout spanning
+                                   # midnight continues its delta chain at the
+                                   # tail instead of re-counting itself whole
+           "epoch_id": "session"},  # id the open workout was counted under
    "days": {"YYYY-MM-DD": {
        "calories", "dist_m", "time_s", "sessions",
        "avg_speed",                # dist/time in km/h, time-weighted
@@ -40,10 +48,10 @@ DATA_DIR = Path.home() / ".local" / "share" / "walkingpad-ba04"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 ROLLUP_FILE = DATA_DIR / "rollup.json"
 
-SESSION_CARRY_WINDOW = 6 * 3600  # a session idle longer than this is over, so
-# only recent counters are worth carrying across the rollup boundary
+CARRY_VALID_FOR = 6 * 3600  # a workout idle longer than this is over, so its
+# counters are no longer worth carrying across the rollup boundary
 
-ROLLUP_VERSION = 2
+ROLLUP_VERSION = 3
 
 # history.jsonl normally holds only today's records (hundreds of lines);
 # these caps stop a wedged or planted file from exhausting the shell's poll.
@@ -85,6 +93,14 @@ def load_records(since: date | None = None) -> list:
     return records
 
 
+def counters_of(record: dict) -> tuple:
+    return (
+        int(record.get("calories", 0)),
+        float(record.get("dist_m", 0)),
+        int(record.get("time_s", 0)),
+    )
+
+
 def _new_day():
     return {
         "calories": 0,
@@ -97,18 +113,20 @@ def _new_day():
     }
 
 
-def aggregate_days(records: list, seed_prev: dict | None = None) -> dict:
+def aggregate_days(records: list, seed_carry: dict | None = None) -> dict:
     """Per-day stats from raw records: {date: {...metrics...}}.
 
-    Calories/distance/time are summed from within-session counter deltas, so
-    sessions spanning midnight attribute correctly and the pad zeroing its
-    counters for a new workout never subtracts. `seed_prev` carries the last
-    counter values per session so a session spanning the rollup boundary keeps
-    its delta chain instead of re-counting its full counter.
+    Each record contributes the delta against the previous reading's counters.
+    A decrease means the pad restarted its counters, i.e. a genuinely new
+    workout, and that reading is counted whole. `seed_carry` continues the
+    chain across the rollup boundary so a workout spanning midnight is not
+    counted twice.
     """
     records = sorted(records, key=lambda r: float(r.get("ts", 0)))
     days = defaultdict(_new_day)
-    prev_by_session = {s: tuple(vals) for s, vals in (seed_prev or {}).items()}
+    carry = seed_carry or {}
+    epoch = tuple(carry["epoch"]) if carry.get("epoch") else None
+    epoch_id = carry.get("epoch_id")
 
     for rec in records:
         ts = float(rec.get("ts", 0))
@@ -116,26 +134,22 @@ def aggregate_days(records: list, seed_prev: dict | None = None) -> dict:
         session = rec.get("session")
         if not session:
             continue
-        cur = (
-            int(rec.get("calories", 0)),
-            float(rec.get("dist_m", 0)),
-            int(rec.get("time_s", 0)),
-        )
-        # The collector records the first reading of a workout whole, so the
-        # first row we see is itself a delta; it also covers a workout already
-        # under way when the daemon connected.
-        prev = prev_by_session.get(session)
-        delta = cur if prev is None else tuple(max(0.0, c - p) for c, p in zip(cur, prev))
-        prev_by_session[session] = cur
+        cur = counters_of(rec)
+        if epoch is None or cur < epoch:
+            delta = cur  # new workout: counters came from zero
+            epoch_id = session
+        else:
+            delta = tuple(c - p for c, p in zip(cur, epoch))
+        epoch = cur
 
         stats = days[day]
-        stats["sessions"].add(session)
+        stats["sessions"].add(epoch_id)
         stats["calories"] += int(delta[0])
         stats["dist_m"] += delta[1]
         stats["time_s"] += int(delta[2])
         if rec.get("state") == 1:
             stats["active_s"] += max(1, int(delta[2]))
-        stats["session_time"][session] += int(delta[2])
+        stats["session_time"][epoch_id] += int(delta[2])
 
         speed = float(rec.get("speed") or 0)
         if rec.get("state") == 1 and speed > 0:
@@ -157,6 +171,15 @@ def aggregate_days(records: list, seed_prev: dict | None = None) -> dict:
             "longest_session_s": max(stats["session_time"].values(), default=0),
         }
     return result
+
+
+def trailing_carry(records: list) -> dict:
+    """Carry state for the last reading in `records`, empty when none."""
+    usable = [r for r in records if r.get("session")]
+    if not usable:
+        return {}
+    last = max(usable, key=lambda r: float(r.get("ts", 0)))
+    return {"epoch": list(counters_of(last)), "epoch_id": last["session"]}
 
 
 def load_rollup() -> dict | None:
@@ -213,7 +236,7 @@ def rebuild_rollup(today: date | None = None) -> tuple[dict, int]:
 
     Incremental: history only holds uncompacted records, so each build merges
     newly compacted days into the existing rollup. The previous rollup's carry
-    seeds the delta chains of sessions spanning midnight.
+    seeds the delta chain of a workout spanning the boundary.
 
     Crash safety: the rollup lands on disk before truncation, and both writes
     are atomic renames, so a crash at any point leaves rollup and history
@@ -235,40 +258,29 @@ def rebuild_rollup(today: date | None = None) -> tuple[dict, int]:
     if existing_through is not None:
         # Only records newer than the existing rollup are uncompacted.
         new_records = [r for r in records if local_date(float(r.get("ts", 0))) > existing_through]
-        seed_prev = existing.get("carry", {})
+        seed_carry = existing.get("carry", {})
     else:
         new_records = records
-        seed_prev = {}
+        seed_carry = {}
 
     compacted = [r for r in new_records if local_date(float(r.get("ts", 0))) <= through]
-    new_days = aggregate_days(compacted, seed_prev=seed_prev)
+    new_days = aggregate_days(compacted, seed_carry=seed_carry)
 
     days = dict(existing.get("days", {}))
     for day, stats in sorted(new_days.items()):
         days[day.isoformat()] = stats
 
-    live_times = [float(r.get("ts", 0)) for r in compacted if r.get("session")]
-    last_live_ts = max([float(existing.get("last_live_ts", 0)), *live_times], default=0.0)
-
-    # Counter state per session near the new boundary, so the next tail can
-    # continue delta chains of sessions spanning midnight. Sessions idle for
-    # over 6h are closed and pruned.
-    carry = {}
-    for rec in compacted:
-        if not rec.get("session"):
-            continue
-        if last_live_ts - float(rec.get("ts", 0)) > SESSION_CARRY_WINDOW:
-            continue
-        carry[rec["session"]] = [
-            int(rec.get("calories", 0)),
-            float(rec.get("dist_m", 0)),
-            int(rec.get("time_s", 0)),
-        ]
+    # Carry the newest compacted counters, but only while a workout could
+    # plausibly still be open: the pad holds counters across a belt stop, so a
+    # stale carry would merge tomorrow's first workout into yesterday's totals.
+    carry = trailing_carry(compacted)
+    last_ts = max((float(r.get("ts", 0)) for r in compacted if r.get("session")), default=0.0)
+    if carry and last_ts and (datetime.now().timestamp() - last_ts) > CARRY_VALID_FOR:
+        carry = {}
 
     rollup = {
         "version": ROLLUP_VERSION,
         "through": through.isoformat(),
-        "last_live_ts": last_live_ts,
         "carry": carry,
         "days": days,
     }
