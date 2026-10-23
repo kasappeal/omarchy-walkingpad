@@ -40,6 +40,14 @@ This is a fork of
 which drives KingSmith WalkingPads. The BA04 speaks a different protocol and
 **does not count steps**, so the primary metric here is calories.
 
+The BA04 protocol layer follows the reverse engineering published in
+[scphyle/ha-pitpat-treadmill](https://github.com/scphyle/ha-pitpat-treadmill)
+and [sirfergy/HomeAssistantWalkingPad](https://github.com/sirfergy/HomeAssistantWalkingPad)
+(both GPL-3.0), which in turn cross-check against
+[cagnulein/qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift) and
+[azmke/pitpat-treadmill-control](https://github.com/azmke/pitpat-treadmill-control).
+See LICENSE for how that interacts with this repo's license.
+
 ## Requirements
 
 - Omarchy (Arch + Hyprland + the omarchy-shell Quickshell bar)
@@ -49,7 +57,7 @@ which drives KingSmith WalkingPads. The BA04 speaks a different protocol and
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/kasappeal/omarchy-walkingpad-ba04.git --enable
+omarchy plugin add https://github.com/kasappeal/omarchy-walkingpad.git --enable
 ```
 
 Then set up the collector backend (Python venv + systemd **user** service):
