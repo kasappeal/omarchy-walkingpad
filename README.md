@@ -71,6 +71,29 @@ BLE library there, and registers `walkingpad-ba04.service` so the collector
 starts at login. Everything runs unprivileged as your user; no data leaves the
 machine.
 
+## Updating
+
+```sh
+omarchy plugin update io.github.kasappeal.omarchy-walkingpad-ba04 --yes
+```
+
+Then tell the two halves of the widget to pick the new files up, because the
+shell loads its QML/JS once at startup (it runs with `QS_DISABLE_FILE_WATCHER=1`)
+and the collector is a separate service:
+
+| You changed | Apply with |
+|-------------|------------|
+| `Panel.qml`, `BarWidget.qml`, `Model.js`, `manifest.json` | `omarchy restart shell` |
+| `backend/*.py` | `systemctl --user restart walkingpad-ba04` |
+
+Without the shell restart the bar keeps rendering the previous code from
+memory, so an interface change can look like it did not take effect even
+though the file on disk is correct.
+
+Do not use `omarchy refresh shell` for this: despite the name it resets
+`~/.config/omarchy/shell.json` to factory defaults, which wipes your bar
+layout and widget settings.
+
 ## Usage
 
 | Action | Result |
