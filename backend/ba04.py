@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Pure protocol layer for the Superun BA04 threadmill (PitPat-T01 and kin).
 
 No Bluetooth imports here: packets in, readings out, so the framing can be

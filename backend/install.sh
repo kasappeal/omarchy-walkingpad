@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # BA04 threadmill widget installer: sets up the collector backend (Python venv
 # + systemd user service) for the Omarchy shell plugin. Safe to re-run.
 set -euo pipefail

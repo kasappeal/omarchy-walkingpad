@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """BA04 threadmill stats helper for the Omarchy bar widget.
 
 Reads the per-day rollup plus today's raw history tail (see rollup.py) and

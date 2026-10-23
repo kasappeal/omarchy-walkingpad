@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the Superun BA04 protocol codec and the collector's session logic.
 
 Runnable without pytest or a Bluetooth adapter:

@@ -86,12 +86,18 @@ Set your daily calorie goal from the popup, or inline in
 `~/.config/omarchy/shell.json`:
 
 ```json
-{ "id": "io.github.kasappeal.omarchy-walkingpad-ba04", "goalCalories": 300, "units": "Auto" }
+{ "id": "io.github.kasappeal.omarchy-walkingpad-ba04", "goalCalories": 300, "units": "Metric" }
 ```
 
-`units` accepts `Auto` (follows your system locale: US English gets mph and
-feet/miles), `Metric`, or `Imperial`. All data is stored in metric; the setting
-only changes display. Some BA04 panels can themselves be switched to mph; the
+`units` accepts `Metric` (the default: km and km/h), `Imperial` (mph and
+feet/miles), or `Auto` (follows your system locale: US English gets imperial).
+All data is stored in metric; the setting only changes display.
+
+Your pad's own panel can independently be set to mph. That does not affect
+storage or the widget: the collector reads the pad's unit flag and normalises to
+metric, so a metric `units` setting always shows km and km/h even when the pad's
+display says mph. Keep the pad's panel on km/h if you want it to agree with the
+bar. Some BA04 panels can themselves be switched to mph; the
 collector reads the pad's unit flag and converts, so the setting is independent
 of the panel.
 
@@ -148,6 +154,23 @@ Three consequences worth knowing:
 - **No pad memory.** KingSmith pads could report a last-run summary, so a
   workout walked while the collector was off could be recovered. The BA04 has
   no such readout: sessions are only saved while the collector runs.
+
+## License
+
+GPL-3.0-or-later — see [LICENSE](LICENSE).
+
+Two lineages meet in this repo, and the license has to satisfy both:
+
+- The KingSmith bar widget this forks was MIT-licensed. That text is kept
+  verbatim in [LICENSE.upstream-MIT.txt](LICENSE.upstream-MIT.txt) as the MIT
+  terms require, and MIT is GPL-compatible, so the combined work can be GPL.
+- The BA04 protocol layer follows reverse-engineering published in
+  [scphyle/ha-pitpat-treadmill](https://github.com/scphyle/ha-pitpat-treadmill)
+  and [sirfergy/HomeAssistantWalkingPad](https://github.com/sirfergy/HomeAssistantWalkingPad),
+  both GPL-3.0. Their framing, byte offsets and unit findings are re-implemented
+  here with attribution above, so this repo is GPL-3.0-or-later rather than MIT.
+
+Every source file carries an `SPDX-License-Identifier: GPL-3.0-or-later` header.
 
 ## Troubleshooting
 

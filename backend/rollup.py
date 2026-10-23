@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Per-day rollup of BA04 threadmill history.
 
 The widget only ever displays day granularity, so records older than today

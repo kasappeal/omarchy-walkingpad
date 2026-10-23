@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 import QtQuick
 import QtQuick.Controls
 import Quickshell
@@ -27,7 +28,7 @@ Panel {
   readonly property string backendDir: Qt.resolvedUrl("backend").toString().replace("file://", "")
   readonly property string venvPython: homeDir + "/.local/share/walkingpad-ba04/venv/bin/python"
   readonly property int goalCalories: Math.max(0, Number(setting("goalCalories", 0)) || 0)
-  readonly property bool imperial: Model.useImperial(setting("units", "Auto"), Qt.locale().name)
+  readonly property bool imperial: Model.useImperial(setting("units", "Metric"), Qt.locale().name)
   readonly property int gridWeeks: 15
   readonly property int cellSize: 18
   readonly property int cellSpacing: 3

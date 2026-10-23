@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Pure helpers for the WalkingPad BA04 widget
 // (io.github.kasappeal.omarchy-walkingpad-ba04). No QML dependencies beyond Qt.
 
@@ -5,7 +6,8 @@ var KM_PER_MI = 1.609344
 var FT_PER_M = 3.28084
 
 // Explicit setting wins; "Auto" falls back to the system locale, matching
-// the stock weather plugin (US, Liberia, Myanmar use imperial).
+// the stock weather plugin (US, Liberia, Myanmar use imperial). The widget
+// defaults to Metric, so imperial only appears if you ask for it.
 function useImperial(units, localeName) {
   var u = String(units || "").toLowerCase()
   if (u === "imperial") return true

@@ -4,7 +4,7 @@
   "name": "WalkingPad BA04",
   "version": "1.0.1",
   "author": "kasappeal",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Superun BA04 treadmill calories in the bar, with a GitHub-style history popup",
   "kinds": [
     "bar-widget"
@@ -20,7 +20,7 @@
     "defaultSection": "center",
     "defaults": {
       "goalCalories": 0,
-      "units": "Auto"
+      "units": "Metric"
     },
     "schema": [
       {
@@ -37,9 +37,13 @@
         "key": "units",
         "type": "enum",
         "label": "Units",
-        "description": "Auto follows your system locale (US English uses imperial).",
-        "options": ["Auto", "Metric", "Imperial"],
-        "defaultValue": "Auto"
+        "description": "Metric (km, km/h) by default. Choose Auto to follow your system locale, or Imperial for mph and feet.",
+        "options": [
+          "Auto",
+          "Metric",
+          "Imperial"
+        ],
+        "defaultValue": "Metric"
       }
     ]
   }

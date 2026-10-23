@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """BA04 threadmill calorie collector daemon.
 
 Idles in a BLE scan loop until a Superun BA04 threadmill (PitPat-T01 and
