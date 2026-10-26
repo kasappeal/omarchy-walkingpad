@@ -46,22 +46,32 @@ Panel {
   property double nowMs: Date.now()
 
   // ---- Belt control state
-  // Controls appear only while the collector holds a live connection, so there
-  // is never a dead button that looks like it should have worked.
-  readonly property bool canControl: root.enabled && !!(stats && stats.connected)
-  readonly property bool beltMoving: !!(stats && stats.walking)
+  // The controls are always on screen. Sending one makes the pad drop its BLE
+  // link and reconnect, which is exactly when they used to vanish: the button
+  // you had just pressed disappeared with it, and could not be pressed again.
+  // Unreachable now reads as disabled, with the reason where the speed sits.
+  readonly property bool padReady: root.connected
+  readonly property bool beltMoving: root.walking
   readonly property string speedText: {
     if (!stats || !stats.live) return ""
     return Model.fmtSpeed(Number(stats.live.target_speed) || 0, imperial)
+  }
+  readonly property string controlStatusText: {
+    if (!stats) return "starting..."
+    if (!root.enabled) return "collector off"
+    if (!root.padReady) return "scanning for the pad..."
+    return root.speedText + (root.beltMoving ? " · belt moving" : " · belt idle")
   }
   readonly property var controlButtons: [
     {action: beltMoving ? "stop" : "start", label: beltMoving ? "Stop" : "Start"},
     {action: "speed_down", label: "−"},
     {action: "speed_up", label: "+"},
   ]
-  // A command the pad could not honour, shown briefly next to the buttons.
+  // A command the pad could not honour. Read from the top level rather than
+  // from `live`, because a refusal is usually followed by the link dropping,
+  // and that is the moment the explanation is needed.
   readonly property string commandNote: {
-    var cmd = stats && stats.live ? stats.live.last_command : null
+    var cmd = stats ? stats.last_command : null
     if (!cmd || cmd.ok) return ""
     if (nowMs / 1000 - Number(cmd.at) > 15) return ""
     return String(cmd.error || "refused")

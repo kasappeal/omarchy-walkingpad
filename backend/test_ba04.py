@@ -13,6 +13,7 @@ anchored to the device rather than to the decoder's own assumptions.
 
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -530,6 +531,23 @@ def test_status_reports_the_last_command():
         c.write_status(reading(ba04.STATE_RUNNING, 1, 10.0, 60), connected=True, force=True)
         status = json.loads((tmp / "status.json").read_text())
         assert status["last_command"]["action"] == "start", status
+
+
+def test_panel_qml_reads_only_members_it_declares():
+    """A binding to an undeclared QML property fails silently: the Text just
+    renders empty and nothing is logged loudly enough to notice. This caught a
+    real regression where the belt row's status label referenced properties that
+    had not made it into the file."""
+    source = (Path(__file__).resolve().parent.parent / "Panel.qml").read_text()
+    declared = set(re.findall(r"(?:readonly\s+)?property\s+\S+\s+(\w+)", source))
+    declared |= set(re.findall(r"function\s+(\w+)\s*\(", source))
+    declared |= set(re.findall(r"^\s*(?:id|objectName):\s*(\w+)", source, re.M))
+    # Provided by the shell to every bar widget plugin.
+    declared |= {"alpha", "bar", "controller", "opened", "close", "open", "setting",
+               "switchPanel"}
+    used = set(re.findall(r"\broot\.(\w+)", source))
+    unknown = sorted(used - declared)
+    assert not unknown, f"Panel.qml reads undeclared members: {unknown}"
 
 
 def main():
