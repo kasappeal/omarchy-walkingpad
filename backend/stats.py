@@ -9,7 +9,10 @@ the collector's live status, and prints one JSON blob:
     "connected": bool, "walking": bool,      # live pad state (fresh only)
     "live":      {"calories", "dist_m", "time_s", "speed", "target_speed",
                   "state", "max_speed", "firmware", "session_start",
-                  "device_name", "address", "last_command"},
+                  "device_name", "address"},   # null unless the pad is talking
+    "last_command": {"action", "speed", "ok", "at"} | null,  # belt control
+                   # outcome, kept while the pad is unreachable so the popup
+                   # can still explain itself
     "today":     {"calories", "dist_m", "time_s", "sessions", ...},
     "start":     "YYYY-MM-DD",               # Monday of the first grid week
     "days":      {"YYYY-MM-DD": {"calories", "dist_m", "time_s", "sessions",
@@ -126,6 +129,20 @@ def live_status():
     return status
 
 
+def last_command():
+    """The most recent belt-command outcome, read outside live_status().
+
+    The pad drops the link around some commands, which blanks the whole live
+    projection, and that window is exactly when the popup needs to explain a
+    refused or stale command rather than fall silent.
+    """
+    status = safeio.read_json(STATUS_FILE, MAX_STATE_BYTES)
+    if not isinstance(status, dict):
+        return None
+    command = status.get("last_command")
+    return command if isinstance(command, dict) else None
+
+
 def known_devices():
     """Pads seen by the collector, strongest signal first."""
     devices = safeio.read_json(DEVICES_FILE, MAX_STATE_BYTES)
@@ -172,6 +189,7 @@ def main() -> None:
     out = json.dumps(
         {
             "enabled": service_enabled(),
+            "last_command": last_command(),
             "connected": bool(live),
             "walking": bool(live and live.get("walking")),
             "live": {
@@ -186,7 +204,6 @@ def main() -> None:
                 "session_start": live.get("session_start"),
                 "device_name": live.get("device_name", ""),
                 "address": live.get("address", ""),
-                "last_command": live.get("last_command"),
             }
             if live
             else None,

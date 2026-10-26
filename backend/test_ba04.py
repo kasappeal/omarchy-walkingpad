@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ba04  # noqa: E402
 import collector  # noqa: E402
 import rollup  # noqa: E402
+import stats  # noqa: E402
 
 # --- captured fixtures -----------------------------------------------------
 
@@ -126,6 +127,7 @@ def make_collector(tmp, record_interval=5.0):
     collector.STATUS_FILE = tmp / "status.json"
     collector.DEVICES_FILE = tmp / "devices.json"
     collector.CONTROL_FILE = tmp / "control.json"
+    stats.STATUS_FILE = tmp / "status.json"
     rollup.DATA_DIR = tmp
     rollup.HISTORY_FILE = tmp / "history.jsonl"
     rollup.ROLLUP_FILE = tmp / "rollup.json"
@@ -287,7 +289,7 @@ def test_status_json_matches_the_widget_contract():
         for key in (
             "enabled", "connected", "device_name", "address", "firmware",
             "max_speed", "state", "walking", "calories", "dist_m", "time_s",
-            "speed", "target_speed", "session_start", "ts",
+            "speed", "target_speed", "session_start", "last_command", "ts",
         ):
             assert key in status, f"status.json missing {key}"
         assert status["walking"] is True and status["state"] == "running"
@@ -307,6 +309,37 @@ def test_live_payload_shape_for_stats():
                     "state", "max_speed", "firmware", "session_start",
                     "device_name", "address"):
             assert key in status, f"stats.py would emit a null/missing {key}"
+
+
+def test_last_command_survives_the_link_dropping():
+    """The belt row stays on screen while the pad is unreachable, so a refusal
+    has to remain readable in stats output too, not only inside the live block
+    that a dropped link blanks out."""
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        c, clock = make_collector(tmp)
+        c.last_command = {
+            "action": "speed_up", "speed": None, "ok": False,
+            "error": "belt stopped", "at": clock.time(),
+        }
+        # The pad drops the link around a command: the collector writes the
+        # status with connected=false and the live projection goes blank.
+        c.on_reading(reading(ba04.STATE_STOPPED, 0, 0.0, 0))
+        c.write_status(connected=False, force=True)
+        status = json.loads((tmp / "status.json").read_text())
+        assert status["connected"] is False
+        assert stats.live_status() is None, "the live projection is blank"
+        note = stats.last_command()
+        assert note and note["error"] == "belt stopped", note
+
+
+def test_last_command_is_absent_before_any_command():
+    with tempfile.TemporaryDirectory() as dir_:
+        tmp = Path(dir_)
+        make_collector(tmp)
+        assert stats.last_command() is None
+        (tmp / "status.json").write_text(json.dumps({"last_command": "junk"}))
+        assert stats.last_command() is None, "a malformed outcome is ignored"
 
 
 def test_rollup_rebuild_and_truncate():

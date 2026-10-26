@@ -633,7 +633,6 @@ Panel {
             anchors.left: parent.left
             anchors.right: parent.right
             height: 1
-            visible: root.canControl
             color: root.alpha(root.foreground, 0.12)
           }
 
@@ -643,12 +642,11 @@ Panel {
             anchors.leftMargin: Style.space(16)
             anchors.rightMargin: Style.space(16)
             spacing: Style.space(10)
-            visible: root.canControl
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: root.speedText + (root.beltMoving ? " · belt moving" : " · belt idle")
-              color: root.foreground
+              text: root.controlStatusText
+              color: root.padReady ? root.foreground : root.muted
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
             }
@@ -658,19 +656,22 @@ Panel {
               delegate: Rectangle {
                 id: controlButton
                 required property var modelData
+                readonly property bool available: root.padReady
                 anchors.verticalCenter: parent.verticalCenter
                 width: controlLabel.implicitWidth + 20
                 height: 28
                 radius: 6
-                color: controlMouse.containsMouse
-                  ? root.alpha(root.accent, 0.25)
-                  : root.alpha(root.accent, 0.12)
+                color: !available
+                  ? root.alpha(root.foreground, 0.07)
+                  : (controlMouse.containsMouse
+                    ? root.alpha(root.accent, 0.25)
+                    : root.alpha(root.accent, 0.12))
 
                 Text {
                   id: controlLabel
                   anchors.centerIn: parent
                   text: controlButton.modelData.label
-                  color: root.accent
+                  color: controlButton.available ? root.accent : root.muted
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                 }
@@ -678,8 +679,9 @@ Panel {
                 MouseArea {
                   id: controlMouse
                   anchors.fill: parent
+                  enabled: controlButton.available
                   hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
+                  cursorShape: controlButton.available ? Qt.PointingHandCursor : Qt.ArrowCursor
                   onClicked: root.sendControl(controlButton.modelData.action)
                 }
               }
